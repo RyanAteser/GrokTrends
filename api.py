@@ -1,63 +1,125 @@
-# app.py
 import os
 from datetime import datetime
 from typing import List, Optional
+from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 
-import psycopg2
-import psycopg2.pool
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 
+import psycopg
+from psycopg_pool import ConnectionPool
+
 load_dotenv()
 
-# ---------- DB POOL ----------
-def make_pool():
+# ======================
+# DB POOL (psycopg 3)
+# ======================
+_POOL: Optional[ConnectionPool] = None
+
+
+def _ensure_ssl_in_dsn(dsn: str) -> str:
+    """Append sslmode=require to a DATABASE_URL if not present (for hosted PG)."""
+    parsed = urlparse(dsn)
+    q = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if "sslmode" not in q:
+        q["sslmode"] = os.getenv("PGSSLMODE", "require")
+    return urlunparse(parsed._replace(query=urlencode(q)))
+
+
+def _build_conninfo() -> str:
+    """Resolve connection info from DATABASE_URL or discrete PG* vars."""
     dsn = os.getenv("DATABASE_URL")
     if dsn:
-        # Render/Neon/Heroku style, force SSL when hosted
-        return psycopg2.pool.SimpleConnectionPool(
-            minconn=1,
-            maxconn=int(os.getenv("PGPOOL_MAX", "5")),
-            dsn=dsn,
-            sslmode=os.getenv("PGSSLMODE", "require"),
-        )
-    # Discrete vars fallback (local dev)
+        return _ensure_ssl_in_dsn(dsn)
+
     host = os.getenv("PGHOST", "localhost")
     db = os.getenv("PGDATABASE", "postgres")
     user = os.getenv("PGUSER", "postgres")
     pwd = os.getenv("PGPASSWORD", "")
     port = os.getenv("PGPORT", "5432")
-    return psycopg2.pool.SimpleConnectionPool(
-        minconn=1,
-        maxconn=int(os.getenv("PGPOOL_MAX", "5")),
-        host=host,
-        database=db,
-        user=user,
-        password=pwd,
-        port=port,
-        sslmode=os.getenv("PGSSLMODE", "disable"),
+    sslmode = os.getenv("PGSSLMODE", "disable")
+
+    # Keepalives help on PaaS
+    keepalives = os.getenv("PG_KEEPALIVES", "1")
+    keepalives_idle = os.getenv("PG_KEEPALIVES_IDLE", "30")
+    keepalives_int = os.getenv("PG_KEEPALIVES_INTERVAL", "10")
+    keepalives_cnt = os.getenv("PG_KEEPALIVES_COUNT", "5")
+
+    return (
+        f"host={host} dbname={db} user={user} password={pwd} port={port} sslmode={sslmode} "
+        f"keepalives={keepalives} keepalives_idle={keepalives_idle} "
+        f"keepalives_interval={keepalives_int} keepalives_count={keepalives_cnt}"
     )
 
-POOL = make_pool()
+
+def make_pool() -> ConnectionPool:
+    """Create (or return existing) psycopg3 pool lazily."""
+    global _POOL
+    if _POOL is not None:
+        return _POOL
+
+    conninfo = _build_conninfo()
+    max_size = int(os.getenv("PGPOOL_MAX", "5"))
+
+    _POOL = ConnectionPool(
+        conninfo=conninfo,
+        max_size=max_size,
+        kwargs={"autocommit": False},  # we control commit/rollback
+    )
+    return _POOL
+
 
 def get_conn():
+    """Borrow a connection from the pool."""
     try:
-        return POOL.getconn()
+        pool = make_pool()
+        conn = pool.getconn()
+        # Optional: set per-connection defaults
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'UTC'")
+            cur.execute("SET statement_timeout = 60000")  # 60s
+        return conn
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB pool error: {e}")
 
+
 def put_conn(conn):
+    """Return a connection to the pool (or close on failure)."""
     try:
-        POOL.putconn(conn)
+        make_pool().putconn(conn)
     except Exception:
         try:
             conn.close()
         except Exception:
             pass
 
-# ---------- APP ----------
+
+def close_pool():
+    global _POOL
+    if _POOL is not None:
+        _POOL.close()
+        _POOL = None
+
+
+def ping_db() -> bool:
+    conn = None
+    try:
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            return cur.fetchone()[0] == 1
+    except Exception:
+        return False
+    finally:
+        if conn:
+            put_conn(conn)
+
+
+# ======================
+# APP
+# ======================
 app = FastAPI(title="Grok Trends API", version="1.0.0")
 
 app.add_middleware(
@@ -72,6 +134,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _startup():
+    # warm the pool so import-time failures don’t crash the process
+    make_pool()
+
+
+@app.on_event("shutdown")
+def _shutdown():
+    close_pool()
+
 
 @app.get("/")
 def root():
@@ -88,22 +162,16 @@ def root():
         },
     }
 
+
 @app.get("/health")
 def health_check():
-    conn = None
-    try:
-        conn = get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1")
-            ok = cur.fetchone()[0] == 1
-        return {"status": "healthy" if ok else "degraded", "database": "connected"}
-    except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
-    finally:
-        if conn:
-            put_conn(conn)
+    ok = ping_db()
+    return {"status": "healthy" if ok else "unhealthy", "database": "connected" if ok else "down"}
 
-# ---------- QUERIES ----------
+
+# ======================
+# QUERIES
+# ======================
 @app.get("/api/trends")
 def get_trends(
         days: int = Query(7, ge=1, le=90),
@@ -113,7 +181,6 @@ def get_trends(
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # Build filters
             params = [days]
             cat_sql = ""
             if category and category != "all":
@@ -121,7 +188,7 @@ def get_trends(
                 params.append(category)
             params.append(limit)
 
-            # NOTE: use INTERVAL '1 day' * %s instead of "INTERVAL '%s days'"
+            # Use INTERVAL '1 day' * %s (safe parameterization)
             cur.execute(
                 f"""
                 SELECT topic_name, category,
@@ -149,7 +216,7 @@ def get_trends(
                 for i, (t, c, m, g) in enumerate(topics_raw)
             ]
 
-            # mini chart for top 3
+            # Tiny chart on top 3
             top_topics = [t["topic"] for t in trending_topics[:3]]
             chart_data = []
             if top_topics:
@@ -170,7 +237,7 @@ def get_trends(
                     date_map[key][topic] = int(count)
                 chart_data = list(date_map.values())
 
-            # stats
+            # Stats
             cur.execute(
                 """
                 SELECT COUNT(DISTINCT tweet_id), COUNT(DISTINCT topic_name)
@@ -223,6 +290,7 @@ def get_trends(
     finally:
         put_conn(conn)
 
+
 @app.get("/api/topics/search")
 def search_topics(q: str = Query(..., min_length=2), limit: int = Query(10, ge=1, le=50)):
     conn = get_conn()
@@ -245,6 +313,7 @@ def search_topics(q: str = Query(..., min_length=2), limit: int = Query(10, ge=1
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         put_conn(conn)
+
 
 @app.get("/api/stats")
 def get_stats():
@@ -281,6 +350,7 @@ def get_stats():
     finally:
         put_conn(conn)
 
+
 @app.get("/api/categories")
 def get_categories():
     conn = get_conn()
@@ -313,6 +383,7 @@ def get_categories():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         put_conn(conn)
+
 
 @app.get("/api/interest")
 def interest_over_time(
@@ -366,6 +437,7 @@ def interest_over_time(
 
         out = {}
         for ts, topic, cat, idx in rows:
+            # psycopg returns aware timestamps here; strip tzinfo for consistent "Z" suffix
             key = ts.replace(tzinfo=None).isoformat() + "Z"
             out.setdefault(key, {"time": key})
             out[key][topic] = idx
@@ -376,9 +448,13 @@ def interest_over_time(
     finally:
         put_conn(conn)
 
-# ---------- Interest signups ----------
+
+# ================
+# Interest signups
+# ================
 class InterestSignup(BaseModel):
     email: EmailStr
+
 
 @app.post("/api/interest-signup")
 def signup_interest(signup: InterestSignup):
@@ -400,16 +476,18 @@ def signup_interest(signup: InterestSignup):
             total = int(cur.fetchone()[0] or 0)
 
         conn.commit()
-        if inserted:
-            msg = "Thanks for your interest! We'll notify you when we launch."
-        else:
-            msg = "You're already on the list!"
+        msg = (
+            "Thanks for your interest! We'll notify you when we launch."
+            if inserted
+            else "You're already on the list!"
+        )
         return {"success": True, "message": msg, "total_signups": total}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         put_conn(conn)
+
 
 @app.get("/api/interest-count")
 def get_interest_count():
@@ -424,7 +502,9 @@ def get_interest_count():
     finally:
         put_conn(conn)
 
+
 # Local dev runner (use Gunicorn in prod)
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=True)
