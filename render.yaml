@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: grok-trends-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python api.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: PGHOST
+        fromDatabase:
+          name: grok-trends-db
+          property: host
+      - key: PGDATABASE
+        fromDatabase:
+          name: grok-trends-db
+          property: database
+      - key: PGUSER
+        fromDatabase:
+          name: grok-trends-db
+          property: user
+      - key: PGPASSWORD
+        fromDatabase:
+          name: grok-trends-db
+          property: password
+      - key: PGPORT
+        value: "5432"
+      - key: X_BEARER_TOKEN
+        sync: false
+
+databases:
+  - name: grok-trends-db
+    databaseName: grok_trends
+    user: grok_user
+    plan: free
