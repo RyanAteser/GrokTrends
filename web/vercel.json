@@ -1,11 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "builds": [
-    { "src": "web/package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
-  ],
-  "routes": [
-    { "src": "^/api/(.*)", "dest": "https://api.groktrends.com/api/$1" },
-    { "src": "^/health$",  "dest": "https://api.groktrends.com/health" },
-    { "src": ".*",         "dest": "web/dist/index.html" }
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://groktrends.onrender.com/api/$1" },
+    { "source": "/health",   "destination": "https://groktrends.onrender.com/health" },
+    { "source": "/((?!api).*)", "destination": "/index.html" }
   ]
 }
