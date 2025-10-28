@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "rewrites": [
-    { "source": "/((?!api).*)", "destination": "/index.html" }
+  "builds": [
+    { "src": "web/package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
+  ],
+  "routes": [
+    { "src": "^/api/(.*)", "dest": "https://api.groktrends.com/api/$1" },
+    { "src": "^/health$",  "dest": "https://api.groktrends.com/health" },
+    { "src": ".*",         "dest": "web/dist/index.html" }
   ]
 }
