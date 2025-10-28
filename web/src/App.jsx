@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { TrendingUp, Search, Plus, X, Calendar, BarChart2, Sparkles } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'https://groktrends.onrender.com';
+export const API_BASE =
+    import.meta.env.VITE_API_BASE || "http://localhost:8000"; // dev fallback
+
 
 const COLORS = ['#818cf8', '#c084fc', '#38bdf8', '#fb7185', '#34d399', '#fbbf24', '#f87171', '#60a5fa'];
 
