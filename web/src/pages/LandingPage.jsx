@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { TrendingUp, Search, Plus, X, Calendar, BarChart2, Sparkles, Zap, CheckCircle, AlertCircle, ExternalLink, Package, FileText } from 'lucide-react';
+import {Analytics} from "@vercel/analytics/react";
 
 // Automatically detect environment
 const API_BASE = import.meta.env.VITE_API_BASE ||
@@ -569,6 +570,7 @@ export default function App() {
                     </div>
                 </div>
             </div>
+            <Analytics/>
         </div>
     );
 }
