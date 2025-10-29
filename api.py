@@ -2,12 +2,14 @@ import os
 from datetime import datetime
 from typing import List, Optional
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+from urllib.request import Request
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
-
+# At the top of your file, update this import:
+from fastapi import FastAPI, HTTPException, Query, Request  # Add Request here
 import psycopg
 from psycopg_pool import ConnectionPool
 
@@ -526,7 +528,187 @@ def signup_interest(signup: InterestSignup):
     finally:
         put_conn(conn)
 
+import stripe
+from fastapi import HTTPException
+from pydantic import BaseModel, EmailStr
 
+# Add to top of file after load_dotenv()
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")  # Add to .env
+
+# New models
+class CheckoutRequest(BaseModel):
+    email: EmailStr
+
+class WebhookEvent(BaseModel):
+    type: str
+    data: dict
+
+# ================
+# STRIPE CHECKOUT
+# ================
+@app.post("/api/create-checkout")
+def create_checkout_session(request: CheckoutRequest):
+    """Create Stripe checkout session for founding member subscription"""
+    try:
+        # Create or get customer
+        customers = stripe.Customer.list(email=request.email, limit=1)
+        if customers.data:
+            customer = customers.data[0]
+        else:
+            customer = stripe.Customer.create(email=request.email)
+
+        # Create checkout session
+        checkout_session = stripe.checkout.Session.create(
+            customer=customer.id,
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': 'Grok Trends - Founding Member',
+                        'description': 'Monthly subscription with lifetime 75% discount ($20/month)',
+                    },
+                    'unit_amount': 2000,  # $20.00 in cents
+                    'recurring': {
+                        'interval': 'month',
+                    },
+                },
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=os.getenv("FRONTEND_URL", "http://localhost:5173") + "/success?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url=os.getenv("FRONTEND_URL", "http://localhost:5173") + "/",
+            metadata={
+                'founding_member': 'true',
+                'locked_price': '2000',  # Lock in price
+            },
+        )
+
+        return {
+            "checkout_url": checkout_session.url,
+            "session_id": checkout_session.id
+        }
+
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================
+# STRIPE WEBHOOK
+# ================
+@app.post("/api/stripe-webhook")
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhook events"""
+    payload = await request.body()
+    sig_header = request.headers.get('stripe-signature')
+    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, webhook_secret
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    # Handle the event
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+
+        # Save to database
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO paid_members (
+                        email, 
+                        stripe_customer_id, 
+                        stripe_subscription_id,
+                        status,
+                        founding_member,
+                        monthly_price_cents
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (email) 
+                    DO UPDATE SET 
+                        stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+                        status = EXCLUDED.status,
+                        updated_at = NOW()
+                    """,
+                    (
+                        session.get('customer_details', {}).get('email'),
+                        session.get('customer'),
+                        session.get('subscription'),
+                        'active',
+                        True,  # founding member
+                        2000   # $20 locked in
+                    )
+                )
+            conn.commit()
+        finally:
+            put_conn(conn)
+
+        # TODO: Send welcome email here
+
+    elif event['type'] == 'customer.subscription.deleted':
+        subscription = event['data']['object']
+
+        # Mark as cancelled in database
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE paid_members 
+                    SET status = 'cancelled', updated_at = NOW()
+                    WHERE stripe_subscription_id = %s
+                    """,
+                    (subscription['id'],)
+                )
+            conn.commit()
+        finally:
+            put_conn(conn)
+
+    return {"status": "success"}
+
+
+# ================
+# Get subscription status
+# ================
+@app.get("/api/subscription-status")
+def get_subscription_status(email: EmailStr = Query(...)):
+    """Check if user has active subscription"""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT status, founding_member, monthly_price_cents, created_at
+                FROM paid_members
+                WHERE email = %s
+                """,
+                (email,)
+            )
+            row = cur.fetchone()
+
+        if not row:
+            return {"subscribed": False}
+
+        return {
+            "subscribed": True,
+            "status": row[0],
+            "founding_member": row[1],
+            "price": row[2] / 100,  # Convert cents to dollars
+            "member_since": row[3].isoformat() if row[3] else None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        put_conn(conn)
 @app.get("/api/interest-count")
 def get_interest_count():
     conn = get_conn()
