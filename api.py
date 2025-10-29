@@ -122,18 +122,20 @@ def ping_db() -> bool:
 # ======================
 app = FastAPI(title="Grok Trends API", version="1.0.0")
 
+VERCEL_PROD = "https://grok-trends-frnl-rh921abyd-ryanatesers-projects.vercel.app"
+CUSTOM_DOMAINS = [
+    "https://groktrends.com",
+    "https://www.groktrends.com",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://grok-trends.vercel.app",
-        "https://groktrends.com",
-        "https://www.groktrends.com",  # add if you’ll use www
-        "http://localhost:5173"
-    ]
-    ,
-    allow_credentials=True,
+    # Option A (strict allow list + wildcard for previews):
+    allow_origins=[VERCEL_PROD, *CUSTOM_DOMAINS],
+    allow_origin_regex=r"https://.*\.vercel\.app$",
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=False,  # IMPORTANT: set False unless you really need cookies/auth
 )
 
 
