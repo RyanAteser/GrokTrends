@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { TrendingUp, Search, Plus, X, Calendar, BarChart2, Sparkles } from 'lucide-react';
-
+import { Analytics } from "@vercel/analytics/next"
 export const API_BASE =
     import.meta.env.VITE_API_BASE || "http://localhost:8000"; // dev fallback
 
