@@ -203,7 +203,7 @@ export default function App() {
 
                 <div id="interest" style={{ maxWidth: '800px', margin: '0 auto', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', borderRadius: '16px', padding: '40px', textAlign: 'center', color: 'white' }}>
                     <h2 style={{ fontSize: '32px', fontWeight: '800', marginBottom: '16px' }}>Want real-time data?</h2>
-                    <p style={{ fontSize: '18px', marginBottom: '32px', opacity: 0.95, lineHeight: '1.6' }}>This demo uses sample data. To launch with live High Quality Grok trends, I need to upgrade the Twitter API ($5000/month).</p>
+                    <p style={{ fontSize: '18px', marginBottom: '32px', opacity: 0.95, lineHeight: '1.6' }}>This demo uses sample data.</p>
                     <div style={{ maxWidth: '500px', margin: '0 auto' }}>
                         <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
                             <input type="email" placeholder="Enter your email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ flex: 1, padding: '14px 20px', borderRadius: '8px', border: 'none', fontSize: '16px', outline: 'none' }} />
@@ -215,7 +215,7 @@ export default function App() {
                     </div>
                     <div style={{ marginTop: '32px', padding: '20px', background: 'rgba(0, 0, 0, 0.2)', borderRadius: '12px', fontSize: '14px' }}>
                         <div style={{ fontSize: '24px', fontWeight: '800', marginBottom: '8px' }}>{signupCount} {signupCount === 1 ? 'person' : 'people'} interested</div>
-                        <div style={{ opacity: 0.9 }}>Goal: 555 users ($9/mo) to launch • Current: {signupCount}</div>
+                        <div style={{ opacity: 0.9 }}>Goal: 555 users  to launch • Current: {signupCount}</div>
                         <div style={{ marginTop: '12px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '999px', height: '8px', overflow: 'hidden' }}><div style={{ background: 'white', height: '100%', width: `${Math.min((signupCount / 12) * 100, 100)}%`, transition: 'width 0.3s' }} /></div>
                     </div>
                 </div>
