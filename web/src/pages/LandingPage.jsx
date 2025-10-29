@@ -163,7 +163,7 @@ export default function App() {
                         <p style={{ marginTop: '16px' }}>You should conduct your own research and consult with qualified professionals before making business decisions.</p>
 
                         <h2 style={{ fontSize: '24px', fontWeight: '700', marginTop: '32px', marginBottom: '16px', color: '#0f172a' }}>5. Refund Policy</h2>
-                        <p><strong>14-Day Money-Back Guarantee:</strong></p>
+                        <p><strong>Cancel Anytime</strong></p>
                         <p>If you are not satisfied with the <strong>service quality</strong> (technical functionality, data delivery, feature access), you may request a full refund within 14 days of your initial purchase.</p>
 
                         <p style={{ marginTop: '16px' }}><strong>Refunds are NOT provided for:</strong></p>
