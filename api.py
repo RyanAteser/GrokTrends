@@ -388,16 +388,25 @@ def get_categories():
         put_conn(conn)
 
 
+from enum import Enum
+from fastapi import Query
+
+class Normalize(str, Enum):
+    per_topic = "per_topic"
+    global_ = "global"
+    none = "none"
+
 @app.get("/api/interest")
 def interest_over_time(
         topics: List[str] = Query(..., description="One or more topic names"),
         hours: int = Query(48, ge=1, le=720, description="Window in hours"),
         metric: str = Query("weighted", pattern="^(weighted|mentions)$"),
+        normalize: Normalize = Query(Normalize.per_topic, description="'per_topic' | 'global' | 'none'")
 ):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            sql = f"""
+            base_sql = f"""
             WITH params AS (
                 SELECT date_trunc('hour', NOW() AT TIME ZONE 'UTC') AS now_hr,
                        %s::INT AS hours_back
@@ -420,37 +429,63 @@ def interest_over_time(
                 SELECT s.bucket_ts, r.topic_name, r.category, COALESCE(r.v, 0) AS v
                 FROM series s
                 LEFT JOIN raw r ON r.bucket_ts = s.bucket_ts
-            ),
-            maxes AS (
-                SELECT topic_name, category, MAX(v) AS vmax
-                FROM joined
-                GROUP BY topic_name, category
             )
-            SELECT j.bucket_ts, j.topic_name, j.category,
-                   CASE WHEN m.vmax > 0
-                        THEN ROUND(100.0 * j.v / m.vmax)::INT
-                        ELSE 0
-                   END AS index_0_100
-            FROM joined j
-            JOIN maxes m USING (topic_name, category)
-            ORDER BY j.bucket_ts ASC, j.topic_name ASC
             """
-            cur.execute(sql, (hours, topics))
+
+            if normalize == Normalize.per_topic:
+                sql = base_sql + """
+                , maxes AS (
+                    SELECT topic_name, category, MAX(v) AS vmax
+                    FROM joined
+                    GROUP BY topic_name, category
+                )
+                SELECT j.bucket_ts, j.topic_name, j.category,
+                       CASE WHEN m.vmax > 0 THEN ROUND(100.0 * j.v / m.vmax)::INT ELSE 0 END AS val
+                FROM joined j
+                JOIN maxes m USING (topic_name, category)
+                ORDER BY j.bucket_ts ASC, j.topic_name ASC
+                """
+                cur.execute(sql, (hours, topics))
+
+            elif normalize == Normalize.global_:
+                sql = base_sql + """
+                , g AS (
+                    SELECT MAX(v) AS gmax FROM joined
+                )
+                SELECT j.bucket_ts, j.topic_name, j.category,
+                       CASE WHEN g.gmax > 0 THEN ROUND(100.0 * j.v / g.gmax)::INT ELSE 0 END AS val
+                FROM joined j, g
+                ORDER BY j.bucket_ts ASC, j.topic_name ASC
+                """
+                cur.execute(sql, (hours, topics))
+
+            else:  # Normalize.none
+                sql = base_sql + """
+                SELECT j.bucket_ts, j.topic_name, j.category, j.v AS val
+                FROM joined j
+                ORDER BY j.bucket_ts ASC, j.topic_name ASC
+                """
+                cur.execute(sql, (hours, topics))
+
             rows = cur.fetchall()
 
         out = {}
-        for ts, topic, cat, idx in rows:
-            # psycopg returns aware timestamps here; strip tzinfo for consistent "Z" suffix
+        for ts, topic, cat, val in rows:
             key = ts.replace(tzinfo=None).isoformat() + "Z"
             out.setdefault(key, {"time": key})
-            out[key][topic] = idx
+            out[key][topic] = int(val)
 
-        return {"metric": metric, "hours": hours, "topics": topics, "series": list(out.values())}
+        return {
+            "metric": metric,
+            "hours": hours,
+            "topics": topics,
+            "normalize": normalize,
+            "series": list(out.values())
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Interest API error: {e}")
     finally:
         put_conn(conn)
-
 
 # ================
 # Interest signups

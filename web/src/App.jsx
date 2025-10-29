@@ -66,6 +66,8 @@ export default function App() {
         selectedTopics.forEach(t => params.append('topics', t));
         params.set('hours', timeRange);
         params.set('metric', 'mentions');
+        params.set('normalize', 'global'); // or 'none' or 'per_topic'
+
         fetch(`${API_BASE}/api/interest?${params}`)
             .then(r => r.json())
             .then(data => {
