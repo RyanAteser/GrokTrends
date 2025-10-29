@@ -238,7 +238,7 @@ export default function App() {
                     </h1>
 
                     <p style={{ fontSize: '20px', color: '#475569', margin: '0 0 32px 0', lineHeight: '1.6' }}>
-                        Real-time social signal analysis from X, Reddit, and TikTok.<br />
+                        Real-time social signal analysis from X, Reddit(coming soon), and TikTok(coming soon).<br />
                         See what's gaining momentum before Google Trends catches up.
                     </p>
 
@@ -348,7 +348,7 @@ export default function App() {
                     <h2 style={{ fontSize: '32px', fontWeight: '800', marginBottom: '48px' }}>How It Works</h2>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '32px' }}>
                         {[
-                            { icon: '🔍', title: 'Monitor Social Signals', desc: 'Track mentions across X, Reddit, TikTok, and other platforms' },
+                            { icon: '🔍', title: 'Monitor Social Signals', desc: 'Track mentions across X, Reddit(coming soon), TikTok(coming soon), and other platforms' },
                             { icon: '🤖', title: 'AI Analyzes Patterns', desc: 'Identify unusual surge patterns and filter noise' },
                             { icon: '⚡', title: 'Get Early Alerts', desc: 'Receive notifications when products show momentum' }
                         ].map((step, idx) => (
