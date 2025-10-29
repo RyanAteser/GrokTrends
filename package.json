@@ -4,6 +4,6 @@
   },
   "dependencies": {
     "@vercel/analytics": "^1.5.0",
-    "react-router-dom": "^6.30.1"
+    "react-router-dom": "6.26.2"
   }
 }
